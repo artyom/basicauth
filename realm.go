@@ -135,3 +135,33 @@ func NewRealm(name string) *Realm {
 		users: make(map[string][]byte),
 	}
 }
+
+// WrapHandlerFunc wraps http.HandlerFunc, checking authentication for each
+// request
+func (realm *Realm) WrapHandlerFunc(f http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if _, err := realm.Check(r); err != nil {
+			realm.Require(w)
+			return
+		}
+		f(w, r)
+	}
+}
+
+// WrapHandler wraps http.Handler, checking authentication for each request
+func (realm *Realm) WrapHandler(handler http.Handler) http.Handler {
+	return &wrappedHandler{handler, realm}
+}
+
+type wrappedHandler struct {
+	http.Handler
+	realm *Realm
+}
+
+func (wrapper *wrappedHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if _, err := wrapper.realm.Check(r); err != nil {
+		wrapper.realm.Require(w)
+		return
+	}
+	wrapper.Handler.ServeHTTP(w, r)
+}
