@@ -42,6 +42,8 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+
+	"code.google.com/p/go.crypto/bcrypt"
 )
 
 type Realm struct {
@@ -49,7 +51,7 @@ type Realm struct {
 	// Authentication realm name
 	Name string
 	// ACL map: keys are usernames, values are passwords
-	users map[string]string
+	users map[string][]byte
 }
 
 // No authentication headers found in HTTP request
@@ -79,8 +81,8 @@ func (realm *Realm) Check(r *http.Request) (username string, err error) {
 	secret := credentials[1]
 	realm.RLock()
 	defer realm.RUnlock()
-	if secretStored, ok := realm.users[username]; ok {
-		if secretStored == secret {
+	if hashedSecret, ok := realm.users[username]; ok {
+		if err := bcrypt.CompareHashAndPassword(hashedSecret, []byte(secret)); err == nil {
 			return username, nil
 		}
 	}
@@ -96,14 +98,33 @@ func (realm *Realm) Require(w http.ResponseWriter) {
 	return
 }
 
-// Add user credentials to realm.
+// AddUser adds user credentials to realm
 func (realm *Realm) AddUser(username, secret string) error {
 	if len(username) == 0 || len(secret) == 0 {
 		return fmt.Errorf("Both username and secret should be non-empty")
 	}
+	hashedSecret, err := bcrypt.GenerateFromPassword([]byte(secret), bcrypt.MinCost)
+	if err != nil {
+		return err
+	}
 	realm.Lock()
 	defer realm.Unlock()
-	realm.users[username] = secret
+	realm.users[username] = hashedSecret
+	return nil
+}
+
+// AddUserHashed adds username and bcrypt-hashed password to realm
+func (realm *Realm) AddUserHashed(username string, hashedSecret []byte) error {
+	if len(username) == 0 || len(hashedSecret) == 0 {
+		return fmt.Errorf("Both username and secret should be non-empty")
+	}
+	// check whether given hash really looks like bcrypt hash
+	if err := bcrypt.CompareHashAndPassword(hashedSecret, nil); err == bcrypt.ErrHashTooShort {
+		return err
+	}
+	realm.Lock()
+	defer realm.Unlock()
+	realm.users[username] = hashedSecret
 	return nil
 }
 
@@ -111,6 +132,6 @@ func (realm *Realm) AddUser(username, secret string) error {
 func NewRealm(name string) *Realm {
 	return &Realm{
 		Name:  name,
-		users: make(map[string]string),
+		users: make(map[string][]byte),
 	}
 }
