@@ -36,11 +36,9 @@
 package basicauth
 
 import (
-	"encoding/base64"
 	"errors"
 	"fmt"
 	"net/http"
-	"strings"
 	"sync"
 
 	"golang.org/x/crypto/bcrypt"
@@ -61,24 +59,10 @@ var NoAuth = errors.New("Authentication required")
 // users). Returned error would be of NoAuth type if no Authorization headers
 // were found if request.
 func (realm *Realm) Check(r *http.Request) (username string, err error) {
-	hdr := r.Header.Get("Authorization")
-	if hdr == "" {
+	username, secret, ok := r.BasicAuth()
+	if !ok {
 		return "", NoAuth
 	}
-	if !strings.HasPrefix(hdr, "Basic ") {
-		return "", fmt.Errorf("Unsupported authentication scheme")
-	}
-	b64data := strings.TrimPrefix(hdr, "Basic ")
-	data, err := base64.StdEncoding.DecodeString(b64data)
-	if err != nil {
-		return "", fmt.Errorf("Failed to decode %q: %s", b64data, err)
-	}
-	credentials := strings.SplitN(string(data), ":", 2)
-	if len(credentials) != 2 {
-		return "", fmt.Errorf("Invalid credentials received: %q", data)
-	}
-	username = credentials[0]
-	secret := credentials[1]
 	realm.RLock()
 	defer realm.RUnlock()
 	if hashedSecret, ok := realm.users[username]; ok {
